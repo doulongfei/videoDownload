@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Go Video Downloader</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style>
+        /* 进度条样式 */
+        .progress-bar {
+            appearance: none;
+            border: none;
+            border-radius: 8px;
+            background-color: #e5e7eb;
+        }
+        
+        .progress-bar::-webkit-progress-bar {
+            background-color: #e5e7eb;
+            border-radius: 8px;
+        }
+        
+        .progress-bar::-webkit-progress-value {
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+        
+        .progress-bar::-moz-progress-bar {
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+        
+        /* 根据状态设置进度条颜色 */
+        .progress-pending::-webkit-progress-value { background-color: #3b82f6; }
+        .progress-pending::-moz-progress-bar { background-color: #3b82f6; }
+        
+        .progress-downloading::-webkit-progress-value { background-color: #eab308; }
+        .progress-downloading::-moz-progress-bar { background-color: #eab308; }
+        
+        .progress-completed::-webkit-progress-value { background-color: #22c55e; }
+        .progress-completed::-moz-progress-bar { background-color: #22c55e; }
+        
+        .progress-error::-webkit-progress-value { background-color: #ef4444; }
+        .progress-error::-moz-progress-bar { background-color: #ef4444; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div x-data="videoDownloader()" class="container mx-auto px-4 py-8">
+        <!-- 标题 -->
+        <div class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-gray-800 mb-2">Go Video Downloader</h1>
+            <p class="text-gray-600">基于Go的M3U8视频下载工具</p>
+        </div>
+
+        <!-- 下载表单 -->
+        <div class="max-w-2xl mx-auto mb-8">
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <!-- 切换标签 -->
+                <div class="flex mb-4 border-b">
+                    <button 
+                        @click="activeTab = 'direct'"
+                        :class="{'border-b-2 border-blue-500 text-blue-600': activeTab === 'direct', 'text-gray-600': activeTab !== 'direct'}"
+                        class="px-4 py-2 font-medium"
+                    >
+                        直接下载
+                    </button>
+                    <button 
+                        @click="activeTab = 'analyze'"
+                        :class="{'border-b-2 border-blue-500 text-blue-600': activeTab === 'analyze', 'text-gray-600': activeTab !== 'analyze'}"
+                        class="px-4 py-2 font-medium"
+                    >
+                        识别视频
+                    </button>
+                </div>
+
+                <!-- 直接下载表单 -->
+                <form x-show="activeTab === 'direct'" @submit.prevent="startDownload()">
+                    <div class="mb-4">
+                        <label for="url" class="block text-sm font-medium text-gray-700 mb-2">
+                            视频URL
+                        </label>
+                        <input 
+                            type="text" 
+                            id="url"
+                            x-model="newUrl"
+                            placeholder="请输入M3U8或其他视频链接..."
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            required
+                        >
+                    </div>
+                    <button 
+                        type="submit"
+                        :disabled="downloading || !newUrl.trim()"
+                        class="w-full bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white font-medium py-2 px-4 rounded-md transition-colors"
+                    >
+                        <span x-show="!downloading">开始下载</span>
+                        <span x-show="downloading" class="flex items-center justify-center">
+                            <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            创建任务中...
+                        </span>
+                    </button>
+                </form>
+
+                <!-- 视频识别表单 -->
+                <div x-show="activeTab === 'analyze'">
+                    <form @submit.prevent="analyzeVideos()">
+                        <div class="mb-4">
+                            <label for="analyze-url" class="block text-sm font-medium text-gray-700 mb-2">
+                                网页URL
+                            </label>
+                            <input 
+                                type="text" 
+                                id="analyze-url"
+                                x-model="analyzeUrl"
+                                placeholder="请输入包含视频的网页链接..."
+                                class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                required
+                            >
+                        </div>
+                        <button 
+                            type="submit"
+                            :disabled="analyzing || !analyzeUrl.trim()"
+                            class="w-full bg-green-500 hover:bg-green-600 disabled:bg-gray-400 text-white font-medium py-2 px-4 rounded-md transition-colors"
+                        >
+                            <span x-show="!analyzing">识别视频</span>
+                            <span x-show="analyzing" class="flex items-center justify-center">
+                                <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                识别中...
+                            </span>
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- 识别到的视频资源 -->
+        <div x-show="videoResources.length > 0" class="max-w-4xl mx-auto mb-8">
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <h3 class="text-lg font-semibold text-gray-800 mb-4">
+                    发现的视频资源 (<span x-text="videoResources.length"></span>)
+                </h3>
+                <div class="space-y-4">
+                    <template x-for="video in videoResources" :key="video.id">
+                        <div class="border rounded-lg p-4 hover:bg-gray-50">
+                            <div class="flex justify-between items-start">
+                                <div class="flex-1">
+                                    <h4 class="font-medium text-gray-900 mb-1" x-text="video.title"></h4>
+                                    <div class="text-sm text-gray-600 space-y-1">
+                                        <div>
+                                            <span class="font-medium">类型:</span>
+                                            <span class="inline-block px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded" x-text="video.type.toUpperCase()"></span>
+                                        </div>
+                                        <div x-show="video.quality && video.quality !== 'unknown'">
+                                            <span class="font-medium">质量:</span>
+                                            <span class="inline-block px-2 py-1 bg-green-100 text-green-800 text-xs rounded" x-text="video.quality"></span>
+                                        </div>
+                                        <div class="break-all">
+                                            <span class="font-medium">链接:</span>
+                                            <span x-text="video.url"></span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <button 
+                                    @click="downloadVideo(video)"
+                                    class="ml-4 bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                                >
+                                    下载
+                                </button>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </div>
+
+        <!-- 任务列表 -->
+        <div class="max-w-4xl mx-auto">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-semibold text-gray-800">下载任务</h2>
+                <div class="text-sm text-gray-500">
+                    实时更新 (SSE)
+                </div>
+            </div>
+
+            <!-- 无任务提示 -->
+            <div x-show="tasks.length === 0" class="text-center py-12">
+                <div class="text-gray-400 text-lg">暂无下载任务</div>
+                <div class="text-gray-500 text-sm mt-2">添加一个视频链接开始下载</div>
+            </div>
+
+            <!-- 任务卡片列表 -->
+            <div class="space-y-4">
+                <template x-for="task in tasks" :key="task.id">
+                    <div class="bg-white rounded-lg shadow-md p-6">
+                        <!-- 任务信息头部 -->
+                        <div class="flex justify-between items-start mb-4">
+                            <div class="flex-1 min-w-0">
+                                <h3 class="text-lg font-medium text-gray-900 truncate" x-text="task.url"></h3>
+                                <p class="text-sm text-gray-500 mt-1">
+                                    创建时间: <span x-text="formatDate(task.created_at)"></span>
+                                </p>
+                            </div>
+                            <div class="ml-4">
+                                <span 
+                                    class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
+                                    :class="getStatusClass(task.status)"
+                                    x-text="getStatusText(task.status)"
+                                ></span>
+                            </div>
+                        </div>
+
+                        <!-- 进度条 -->
+                        <div class="mb-4">
+                            <div class="flex justify-between text-sm text-gray-600 mb-1">
+                                <span>下载进度</span>
+                                <span x-text="task.progress + '%'"></span>
+                            </div>
+                            <!-- 使用 HTML progress 元素 -->
+                            <progress 
+                                class="w-full h-3 progress-bar"
+                                :value="task.progress" 
+                                max="100"
+                                :class="getProgressClass(task.status)"
+                            ></progress>
+                        </div>
+
+                        <!-- 状态信息和操作 -->
+                        <div class="space-y-3">
+                            <!-- 详细下载信息 -->
+                            <div x-show="task.status === 'downloading'" class="grid grid-cols-2 gap-4 text-sm text-gray-600">
+                                <div>
+                                    <span class="font-medium">文件大小:</span>
+                                    <span x-text="formatFileSize(task.file_size)"></span>
+                                </div>
+                                <div>
+                                    <span class="font-medium">已下载:</span>
+                                    <span x-text="formatFileSize(task.downloaded_size)"></span>
+                                </div>
+                                <div>
+                                    <span class="font-medium">当前速度:</span>
+                                    <span x-text="formatSpeed(task.download_speed)"></span>
+                                </div>
+                                <div x-show="task.time_remaining > 0">
+                                    <span class="font-medium">剩余时间:</span>
+                                    <span x-text="formatTime(task.time_remaining)"></span>
+                                </div>
+                            </div>
+                            
+                            <!-- 完成后的统计信息 -->
+                            <div x-show="task.status === 'completed'" class="grid grid-cols-2 gap-4 text-sm text-gray-600">
+                                <div>
+                                    <span class="font-medium">文件大小:</span>
+                                    <span x-text="formatFileSize(task.file_size)"></span>
+                                </div>
+                                <div>
+                                    <span class="font-medium">平均速度:</span>
+                                    <span class="text-blue-600 font-semibold" x-text="formatSpeed(task.average_speed)"></span>
+                                </div>
+                                <div>
+                                    <span class="font-medium">总耗时:</span>
+                                    <span x-text="formatTime(task.total_duration)"></span>
+                                </div>
+                                <div>
+                                    <span class="font-medium">下载时间:</span>
+                                    <span x-text="formatDateRange(task.start_time, task.end_time)"></span>
+                                </div>
+                            </div>
+                            
+                            <!-- 状态信息 -->
+                            <div class="flex justify-between items-center">
+                                <div class="text-sm text-gray-600">
+                                    <span x-show="task.status === 'downloading'">
+                                        下载中 <span x-text="task.progress"></span>%
+                                    </span>
+                                    <span x-show="task.status === 'completed'">
+                                        下载完成 - <span class="text-green-600" x-text="task.output_file_path"></span>
+                                        <div class="text-xs mt-1 space-y-1">
+                                            <div x-show="task.file_size > 0">
+                                                文件大小: <span x-text="formatFileSize(task.file_size)"></span>
+                                            </div>
+                                            <div x-show="task.average_speed > 0" class="text-blue-600">
+                                                平均速度: <span x-text="formatSpeed(task.average_speed)"></span>
+                                            </div>
+                                            <div x-show="task.total_duration > 0" class="text-gray-600">
+                                                总耗时: <span x-text="formatTime(task.total_duration)"></span>
+                                            </div>
+                                        </div>
+                                    </span>
+                                    <span x-show="task.status === 'error'" class="text-red-600">
+                                        下载失败: <span x-text="task.error_message"></span>
+                                    </span>
+                                    <span x-show="task.status === 'pending'" class="text-blue-600">
+                                        准备中...
+                                    </span>
+                                </div>
+                                
+                                <!-- 操作按钮 -->
+                                <div class="flex space-x-2">
+                                    <button 
+                                        x-show="task.status === 'downloading' || task.status === 'pending'"
+                                        class="text-red-600 hover:text-red-800 text-sm font-medium"
+                                        @click="cancelTask(task.id)"
+                                    >
+                                        取消
+                                    </button>
+                                    <button 
+                                        x-show="task.status === 'error'"
+                                        class="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                                        @click="retryTask(task)"
+                                    >
+                                        重试
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function videoDownloader() {
+            return {
+                activeTab: 'direct',
+                newUrl: '',
+                analyzeUrl: '',
+                tasks: [],
+                videoResources: [],
+                downloading: false,
+                analyzing: false,
+                eventSources: new Map(), // 存储每个任务的 EventSource
+
+                init() {
+                    this.fetchTasks();
+                    
+                    // 页面卸载时清理所有 SSE 连接
+                    window.addEventListener('beforeunload', () => {
+                        this.eventSources.forEach(eventSource => {
+                            eventSource.close();
+                        });
+                    });
+                },
+
+                async startDownload() {
+                    if (!this.newUrl.trim()) return;
+
+                    this.downloading = true;
+                    try {
+                        const response = await fetch('/api/download', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({ url: this.newUrl })
+                        });
+
+                        if (response.ok) {
+                            const task = await response.json();
+                            this.tasks.unshift(task);
+                            this.newUrl = '';
+                            
+                            // 为新任务创建 SSE 连接
+                            this.setupSSEForTask(task.id);
+                        } else {
+                            alert('创建下载任务失败');
+                        }
+                    } catch (error) {
+                        alert('网络错误: ' + error.message);
+                    } finally {
+                        this.downloading = false;
+                    }
+                },
+
+                async analyzeVideos() {
+                    if (!this.analyzeUrl.trim()) return;
+
+                    this.analyzing = true;
+                    this.videoResources = [];
+                    
+                    try {
+                        const response = await fetch('/api/analyze', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({ url: this.analyzeUrl })
+                        });
+
+                        if (response.ok) {
+                            const result = await response.json();
+                            if (result.success) {
+                                this.videoResources = result.videos;
+                                if (result.videos.length === 0) {
+                                    alert('未在该网页中发现视频资源');
+                                }
+                            } else {
+                                alert('分析失败: ' + result.error);
+                            }
+                        } else {
+                            alert('分析请求失败');
+                        }
+                    } catch (error) {
+                        alert('网络错误: ' + error.message);
+                    } finally {
+                        this.analyzing = false;
+                    }
+                },
+
+                async downloadVideo(video) {
+                    // 使用视频资源的URL创建下载任务
+                    const originalUrl = this.newUrl;
+                    this.newUrl = video.url;
+                    await this.startDownload();
+                    this.newUrl = originalUrl;
+                },
+
+                setupSSEForTask(taskId) {
+                    // 如果该任务已有 SSE 连接，先关闭
+                    if (this.eventSources.has(taskId)) {
+                        this.eventSources.get(taskId).close();
+                    }
+                    
+                    const eventSource = new EventSource(`/api/progress/${taskId}`);
+                    this.eventSources.set(taskId, eventSource);
+                    
+                    eventSource.onmessage = (event) => {
+                        const updatedTask = JSON.parse(event.data);
+                        this.updateTaskInList(updatedTask);
+                        
+                        // 如果任务完成或失败，关闭 SSE 连接
+                        if (updatedTask.status === 'completed' || updatedTask.status === 'error') {
+                            eventSource.close();
+                            this.eventSources.delete(taskId);
+                        }
+                    };
+                    
+                    eventSource.onerror = (error) => {
+                        console.error('SSE 连接错误:', error);
+                        eventSource.close();
+                        this.eventSources.delete(taskId);
+                    };
+                },
+
+                updateTaskInList(updatedTask) {
+                    const taskIndex = this.tasks.findIndex(task => task.id === updatedTask.id);
+                    if (taskIndex !== -1) {
+                        this.tasks[taskIndex] = updatedTask;
+                    }
+                },
+
+                async fetchTasks() {
+                    try {
+                        const response = await fetch('/api/status');
+                        if (response.ok) {
+                            this.tasks = await response.json();
+                            // 按创建时间倒序排列
+                            this.tasks.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                            
+                            // 为正在进行的任务设置 SSE 连接
+                            this.tasks.forEach(task => {
+                                if (task.status === 'pending' || task.status === 'downloading') {
+                                    this.setupSSEForTask(task.id);
+                                }
+                            });
+                        }
+                    } catch (error) {
+                        console.error('获取任务失败:', error);
+                    }
+                },
+
+                async cancelTask(taskId) {
+                    // 关闭 SSE 连接
+                    if (this.eventSources.has(taskId)) {
+                        this.eventSources.get(taskId).close();
+                        this.eventSources.delete(taskId);
+                    }
+                    
+                    // 从列表中移除任务
+                    this.tasks = this.tasks.filter(task => task.id !== taskId);
+                },
+
+                async retryTask(task) {
+                    this.newUrl = task.url;
+                    await this.startDownload();
+                },
+
+                getStatusText(status) {
+                    const statusMap = {
+                        'pending': '准备中',
+                        'downloading': '下载中',
+                        'completed': '已完成',
+                        'error': '失败'
+                    };
+                    return statusMap[status] || status;
+                },
+
+                getStatusClass(status) {
+                    const classMap = {
+                        'pending': 'bg-blue-100 text-blue-800',
+                        'downloading': 'bg-yellow-100 text-yellow-800',
+                        'completed': 'bg-green-100 text-green-800',
+                        'error': 'bg-red-100 text-red-800'
+                    };
+                    return classMap[status] || 'bg-gray-100 text-gray-800';
+                },
+
+                getProgressClass(status) {
+                    const classMap = {
+                        'pending': 'progress-pending',
+                        'downloading': 'progress-downloading',
+                        'completed': 'progress-completed',
+                        'error': 'progress-error'
+                    };
+                    return classMap[status] || 'progress-pending';
+                },
+
+                formatDate(dateString) {
+                    return new Date(dateString).toLocaleString('zh-CN');
+                },
+
+                formatFileSize(bytes) {
+                    if (!bytes || bytes === 0) return '未知';
+                    const units = ['B', 'KB', 'MB', 'GB'];
+                    let size = bytes;
+                    let unitIndex = 0;
+                    
+                    while (size >= 1024 && unitIndex < units.length - 1) {
+                        size /= 1024;
+                        unitIndex++;
+                    }
+                    
+                    return size.toFixed(1) + ' ' + units[unitIndex];
+                },
+
+                formatSpeed(bytesPerSecond) {
+                    if (!bytesPerSecond || bytesPerSecond === 0) return '计算中...';
+                    return this.formatFileSize(bytesPerSecond) + '/s';
+                },
+
+                formatTime(seconds) {
+                    if (!seconds || seconds <= 0) return '计算中...';
+                    
+                    const hours = Math.floor(seconds / 3600);
+                    const minutes = Math.floor((seconds % 3600) / 60);
+                    const remainingSeconds = Math.floor(seconds % 60);
+                    
+                    if (hours > 0) {
+                        return `${hours}:${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+                    } else if (minutes > 0) {
+                        return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+                    } else {
+                        return `${remainingSeconds}秒`;
+                    }
+                },
+
+                formatDateRange(startTime, endTime) {
+                    if (!startTime || !endTime) return '未知';
+                    
+                    const start = new Date(startTime);
+                    const end = new Date(endTime);
+                    
+                    return `${start.toLocaleTimeString('zh-CN')} - ${end.toLocaleTimeString('zh-CN')}`;
+                }
+            }
+        }
+    </script>
+</body>
+</html>
