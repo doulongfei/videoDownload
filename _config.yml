@@ -1,0 +1,7 @@
+theme: minima
+title: Go Video Downloader
+description: 基于Go语言开发的智能视频下载器，支持多种视频格式下载与智能资源检测
+url: https://doulongfei.github.io/videoDownload
+plugins:
+  - jekyll-sitemap
+  - jekyll-feed
